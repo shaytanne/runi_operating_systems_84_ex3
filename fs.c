@@ -48,6 +48,10 @@ int fs_format(const char* disk_path){
         return -1; // Error opening file
     }
 
+    // Allocate 10 MB: seek to (10 * 1024 * 1024) - 1 and write one byte
+    lseek(disk_fd, ((10 * 1024 * 1024) - 1), SEEK_SET);
+
+    write(disk_fd, "", 1); // Write a single byte to allocate the space
     // ==============================================================================
     // Initialize superblock
     superblock sb;
@@ -58,7 +62,7 @@ int fs_format(const char* disk_path){
     sb.free_inodes = MAX_FILES; // Initially all inodes are free
 
     // Writing superblock 
-    lseek ( disk_fd , 0 * BLOCK_SIZE , SEEK_SET ) ; // Move to the start of the disk
+    lseek ( disk_fd ,  0 * BLOCK_SIZE , SEEK_SET ) ; // Move to the start of the disk
     write ( disk_fd , &sb , sizeof(superblock) ) ; // Write the superblock to block 0
 
     // ==============================================================================
@@ -72,7 +76,7 @@ int fs_format(const char* disk_path){
         bitmap[i / 8] |= (1 << (i % 8)); // Mark blocks 2-9 as used (inode table)
     }
     for (int i = 10; i < MAX_BLOCKS / 8; i++) {
-        bitmap [i/8] &= ~(1 << ( i %8) ); // Set all blocks as free (1)
+        bitmap [i/8] &= ~(1 << ( i %8) ); // Set all blocks as free (0)
     }
 
     // Writing block bitmap
@@ -192,14 +196,47 @@ void fs_unmount()
 
 
 
+/**
+ * @brief Creates a new empty file
+ * 
+ * Allocates an inode for a new file with the specified name. The file
+ * initially has zero size and no allocated data blocks.
+ * 
+ * @param filename Name of the file to create (null-terminated, max 28 chars)
+ * @return 0 on success, -1 if file already exists, -2 if no free inodes, -3 for other errors
+ */
+fs_create(const char* filename)
+{
+    if (!is_mounted) {
+        return -3; // other errors
+    }
+    // Check if the filename is already in use
+    int existing_inode_index = find_inode(filename);
+    if (existing_inode_index >= 0) {
+        return -1; // File already exists
+    }
+    // Find a free inode
+    int inode_index = find_free_inode();
+    if (inode_index < 0) {
+        return -1; // No free inode available
+    }
 
 
+    // Initialize the new inode
+    inode new_inode;
+    new_inode.used = true;
+    new_inode.size = 0;
+    new_inode.blocks[0] = block_index;
+    strncpy(new_inode.name, filename, MAX_FILENAME_LEN);
 
+    // Write the new inode to the disk
+    write_inode(inode_index, &new_inode);
 
+    // Mark the block as used
+    mark_block_used(block_index);
 
-
-
-
+    return 0; // Success
+}
 
 
 
@@ -237,8 +274,7 @@ int find_inode ( const char * filename ) {
 // Find a free inode
 int find_free_inode () {
     // Open the disk image file
-    // TODO change the disk image file name to a constant
-    int disk_fd = open("disk.img", O_RDWR);
+    int disk_fd = open(DISK_IMAGE_FILE, O_RDWR);
     if (disk_fd < 0) {
         return -3; // Error opening file
     }
