@@ -22,8 +22,8 @@ void read_inode ( int inode_num , inode * target ) ;
 void write_inode ( int inode_num , const inode * source ) ;
 
 
-int disk_fd;
-bool is_mounted = true; // Flag to check if the filesystem is mounted;
+int disk_fd = -1; // file descriptor for the disk image file
+bool is_mounted = false; // Flag to check if the filesystem is mounted;
 
 
 /**
@@ -42,16 +42,21 @@ bool is_mounted = true; // Flag to check if the filesystem is mounted;
  * @return 0 on success, -1 on error (e.g., cannot create file)
  */
 int fs_format(const char* disk_path){
+    // check if a filesystem of this type is already mounted
+    if (is_mounted) {
+        return -1;
+    }
+
     // Opening the virtual disk
-    int disk_fd = open ( disk_path , O_RDWR | O_CREAT , 0644) ;
-    if (!disk_fd) {
+    disk_fd = open(disk_path, O_RDWR | O_CREAT, 0644);
+    if (disk_fd < 0) {
         return -1; // Error opening file
     }
 
     // Allocate 10 MB: seek to (10 * 1024 * 1024) - 1 and write one byte
     lseek(disk_fd, ((10 * 1024 * 1024) - 1), SEEK_SET);
-
     write(disk_fd, "", 1); // Write a single byte to allocate the space
+
     // ==============================================================================
     // Initialize superblock
     superblock sb;
@@ -106,6 +111,9 @@ int fs_format(const char* disk_path){
     // ==============================================================================
 
     close(disk_fd);
+    disk_fd = -1; // reset disk_fd to indicate no open file
+    is_mounted = false; // reset the is_mounted flag
+
     return 0; // Success
 }
 
@@ -121,6 +129,10 @@ int fs_format(const char* disk_path){
  * @return 0 on success, -1 on error (e.g., file not found or invalid filesystem)
  */
 int fs_mount(const char* disk_path){
+    if (is_mounted) {
+        return -1; // already mounted
+    }
+
     // Open the disk image file
     disk_fd = open(disk_path, O_RDWR);
     if (disk_fd < 0) {
@@ -172,6 +184,8 @@ int fs_mount(const char* disk_path){
         return -1; // Invalid filesystem structure
     }
     is_mounted = true; // Set the mounted flag to true
+
+    return 0;
 }
 
 
@@ -205,7 +219,7 @@ void fs_unmount()
  * @param filename Name of the file to create (null-terminated, max 28 chars)
  * @return 0 on success, -1 if file already exists, -2 if no free inodes, -3 for other errors
  */
-fs_create(const char* filename)
+int fs_create(const char* filename)
 {
     if (!is_mounted) {
         return -3; // other errors
@@ -248,11 +262,12 @@ fs_create(const char* filename)
 
 // Find an inode by filename
 int find_inode ( const char * filename ) {
-    // Open the disk image file
-    // TODO change the disk image file name to a constant
-    int disk_fd = open("disk.img", O_RDWR);
+    if (!is_mounted) {
+        return -1; // FS not mounted
+    }
+
     if (disk_fd < 0) {
-        return -1; // Error opening file
+        return -1; // error opening file
     }
 
     inode inodes[MAX_FILES];
@@ -262,21 +277,21 @@ int find_inode ( const char * filename ) {
     // Search for the inode with the given filename
     for (int i = 0; i < MAX_FILES; i++) {
         if (inodes[i].used && strcmp(inodes[i].name, filename) == 0) {
-            close(disk_fd);
             return i; // Found the inode
         }
     }
 
-    close(disk_fd);
     return -1; // Inode not found
 }
 
 // Find a free inode
 int find_free_inode () {
-    // Open the disk image file
-    int disk_fd = open(DISK_IMAGE_FILE, O_RDWR);
+    if (!is_mounted) {
+        return -1; // FS not mounted
+    }
+
     if (disk_fd < 0) {
-        return -3; // Error opening file
+        return -3; // error opening file
     }
 
     inode inodes[MAX_FILES];
@@ -286,21 +301,21 @@ int find_free_inode () {
     // Search for a free inode
     for (int i = 0; i < MAX_FILES; i++) {
         if (!inodes[i].used) {
-            close(disk_fd);
             return i; // Found a free inode
         }
     }
 
-    close(disk_fd);
     return -2; // No free inode found
 }
 
 // Find a free block
 int find_free_block () {
-    // Open the disk image file
-    int disk_fd = open("disk.img", O_RDWR);
+    if (!is_mounted) {
+        return -1; // FS not mounted
+    }
+
     if (disk_fd < 0) {
-        return -1; // Error opening file
+        return -1; // error opening file
     }
 
     unsigned char bitmap[MAX_BLOCKS / 8];
@@ -312,28 +327,26 @@ int find_free_block () {
     // TODO: Check if the bitmap is correctly initialized
     for (int i = 4; i < MAX_BLOCKS; i++) {
         if ((bitmap[i / 8] & (1 << (i % 8)))) {
-            close(disk_fd);
             return i; // Found a free block
         }
     }
 
-    close(disk_fd);
     return -1; // No free block found
-
 }
 
 // Mark a block as used
 void mark_block_used ( int block_num ) {
-    // Open the disk image file
-    // TODO change the disk image file name to a constant
-    int disk_fd = open("disk.img", O_RDWR);
-    if (disk_fd < 0) {
-        return -3; // Error opening file
+    if (!is_mounted) {
+        return; // FS not mounted
     }
+
+    if (disk_fd < 0) {
+        return; // error opening file
+    }
+    
     // Ensure block_num is within valid range
     if (block_num < 0 || block_num >= MAX_BLOCKS) {
-        close(disk_fd);
-        return -3; // Invalid block number
+        return; // Invalid block number
     }
     unsigned char bitmap[MAX_BLOCKS / 8];
     lseek(disk_fd, 1 * BLOCK_SIZE, SEEK_SET); // Move to the block bitmap
@@ -345,22 +358,21 @@ void mark_block_used ( int block_num ) {
     // Write the updated bitmap back to disk
     lseek(disk_fd, 1 * BLOCK_SIZE, SEEK_SET); // Move back to the block bitmap
     write(disk_fd, bitmap, sizeof(bitmap)); // Write the updated bitmap
-
-    close(disk_fd);
 }
 
 // Mark a block as free
 void mark_block_free ( int block_num ) {
-    // Open the disk image file
-    // TODO change the disk image file name to a constant
-    int disk_fd = open("disk.img", O_RDWR);
-    if (disk_fd < 0) {
-        return -3; // Error opening file
+    if (!is_mounted) {
+        return; // FS not mounted
     }
+
+    if (disk_fd < 0) {
+        return; // Error opening file
+    }
+
     // Ensure block_num is within valid range
     if (block_num < 0 || block_num >= MAX_BLOCKS) {
-        close(disk_fd);
-        return -3; // Invalid block number
+        return; // Invalid block number
     }
     unsigned char bitmap[MAX_BLOCKS / 8];
     lseek(disk_fd, 1 * BLOCK_SIZE, SEEK_SET); // Move to the block bitmap
@@ -372,23 +384,21 @@ void mark_block_free ( int block_num ) {
     // Write the updated bitmap back to disk
     lseek(disk_fd, 1 * BLOCK_SIZE, SEEK_SET); // Move back to the block bitmap
     write(disk_fd, bitmap, sizeof(bitmap)); // Write the updated bitmap
-
-    close(disk_fd);
 }
 
 // Read an inode from disk
 void read_inode ( int inode_num , inode * target ) {
-    // Open the disk image file
-    // TODO change the disk image file name to a constant
-    int disk_fd = open("disk.img", O_RDWR);
+    if (!is_mounted) {
+        return; // FS not mounted
+    }
+
     if (disk_fd < 0) {
-        return -3; // Error opening file
+        return; // error opening file
     }
 
     // Ensure inode_num is within valid range
     if (inode_num < 0 || inode_num >= MAX_FILES) {
-        close(disk_fd);
-        return -3; // Invalid inode number
+        return; // Invalid inode number
     }
 
     // Read the inode table from disk
@@ -398,23 +408,21 @@ void read_inode ( int inode_num , inode * target ) {
 
     // Copy the specified inode to target
     *target = inodes[inode_num];
-
-    close(disk_fd);
 }
 
 // Write an inode to disk
 void write_inode ( int inode_num , const inode * source ) {
-    // Open the disk image file
-    // TODO change the disk image file name to a constant
-    int disk_fd = open("disk.img", O_RDWR);
+    if (!is_mounted) {
+        return; // FS not mounted
+    }
+
     if (disk_fd < 0) {
-        return -3; // Error opening file
+        return; // error opening file
     }
 
     // Ensure inode_num is within valid range
     if (inode_num < 0 || inode_num >= MAX_FILES) {
-        close(disk_fd);
-        return -3; // Invalid inode number
+        return; // Invalid inode number
     }
 
     // Read the inode table from disk
@@ -428,6 +436,4 @@ void write_inode ( int inode_num , const inode * source ) {
     // Write the updated inode table back to disk
     lseek(disk_fd, 2 * BLOCK_SIZE, SEEK_SET); // Move back to the start of the inode table
     write(disk_fd, inodes, sizeof(inodes)); // Write the updated inode table
-
-    close(disk_fd);
 }
