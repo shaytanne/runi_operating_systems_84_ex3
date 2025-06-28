@@ -329,36 +329,44 @@ int fs_write(const char* filename, const void* data, int size) {
     // Read the inode to get its current state
     inode target_inode;
     read_inode(inode_index, &target_inode);
-    int index_block = find_free_block();
-
-    if (index_block < 0) {
-        return -2; // Out of space
-    }
-
+   
     // TODO:  Calculate number of blocks needed
     int num_blocks = (size + BLOCK_SIZE - 1) / BLOCK_SIZE; // Calculate number of blocks needed
 
     inode inodes[MAX_FILES];
     lseek(disk_fd, 2 * BLOCK_SIZE, SEEK_SET); // Move to the start of the inode table
     read(disk_fd, inodes, sizeof(inodes)); // Read the inode table
-    for (int i = size; i < BLOCK_SIZE; i++)
-    {
-        /* code */
-    }
-    
-    for (int i = 0; i < MAX_DIRECT_BLOCKS; i++) {
-        if (inodes[inode_index].blocks[i] == -1) {
-            inodes[inode_index].blocks[i] = index_block; // Found the inode index
-            mark_block_used(index_block); // Mark the block as used
-            break;
-        }
+
+    // Check if the file already has enough blocks allocated
+    if (num_blocks > MAX_DIRECT_BLOCKS ) {
+        return -2; // Too many blocks requested, exceeds maximum direct blocks
     }
 
-    // Write the data to the allocated blocks
-    for (int i = 0; i < blocks_needed; i++) {
-        lseek(disk_fd, target_inode.blocks[i] * BLOCK_SIZE, SEEK_SET);
+    // If the file already has blocks, free them before allocating new ones
+    if (target_inode.size > 0) {
+        for (int j = 0; j < MAX_DIRECT_BLOCKS; j++) {
+            if (target_inode.blocks[j] != -1) {
+                mark_block_free(target_inode.blocks[j]); // Free existing blocks
+                target_inode.blocks[j] = -1; // Reset the block pointer
+            }
+        }
+    } 
+
+    for (int i = 0; i < num_blocks; i++)
+    {
+        int index_block = find_free_block();
+
+        if (index_block < 0) {
+            return -2; // Out of space
+        }
+
+        inodes[inode_index].blocks[i] = index_block; // Allocate a new block for the file
+        mark_block_used(index_block); // Mark the block as used
+        
+        lseek(disk_fd, inodes[inode_index].blocks[i] * BLOCK_SIZE, SEEK_SET);
         write(disk_fd, data + (i * BLOCK_SIZE), BLOCK_SIZE);
     }
+
 
     // Update the inode with new size and mark it as used
     target_inode.used = true;
@@ -368,6 +376,60 @@ int fs_write(const char* filename, const void* data, int size) {
     write_inode(inode_index, &target_inode);
 
     return 0; // Success
+}
+
+
+/**
+ * @brief Reads data from a file
+ * 
+ * Reads up to 'size' bytes from the specified file into the provided buffer.
+ * If the file is smaller than the requested size, only the available data is read.
+ * 
+ * @param filename Name of the file to read from
+ * @param buffer Pre-allocated buffer to receive the data
+ * @param size Size of the buffer in bytes
+ * @return Number of bytes read on success, -1 if file not found, -3 for other errors
+ */
+int fs_read(const char* filename, void* buffer, int size){
+    if (is_mounted == false) {
+        return -3; // Filesystem not mounted
+    }
+
+    if (filename == NULL || strlen(filename) == 0 || strlen(filename) > 28) {
+        return -3; // Invalid filename
+    }
+
+    if (buffer == NULL || size <= 0) {
+        return -3; // Invalid buffer or size
+    }
+
+    int inode_index = find_inode(filename);
+    if (inode_index < 0) {
+        return -1; // File not found
+    }
+
+    // Read the inode to get its data blocks and size
+    inode target_inode;
+    read_inode(inode_index, &target_inode);
+
+    // Check if the requested size exceeds the file size
+    if (size > target_inode.size) {
+        size = target_inode.size; // Adjust size to the actual file size
+    }
+
+
+    int bytes_read = 0;
+    
+    for (int i = 0; i < MAX_DIRECT_BLOCKS && bytes_read < size; i++) {
+        if (target_inode.blocks[i] != -1) {
+            lseek(disk_fd, target_inode.blocks[i] * BLOCK_SIZE, SEEK_SET);
+            int bytes_to_read = (size - bytes_read < BLOCK_SIZE) ? (size - bytes_read) : BLOCK_SIZE;
+            read(disk_fd, (char*)buffer + bytes_read, bytes_to_read);
+            bytes_read += bytes_to_read;
+        }
+    }
+
+    return bytes_read; // Return the number of bytes read
 }
 
 /**
@@ -382,11 +444,11 @@ int fs_write(const char* filename, const void* data, int size) {
 int fs_delete(const char* filename)
 {
     if (is_mounted == false) {
-        return -3; // Filesystem not mounted
+        return -2; // Filesystem not mounted
     }
 
     if (filename == NULL || strlen(filename) == 0 || strlen(filename) > 28) {
-        return -3; // Invalid filename
+        return -2; // Invalid filename
     }
 
     int inode_index = find_inode(filename);
@@ -402,6 +464,7 @@ int fs_delete(const char* filename)
     for (int i = 0; i < MAX_DIRECT_BLOCKS; i++) {
         if (target_inode.blocks[i] >= 0) {
             mark_block_free(target_inode.blocks[i]);
+            target_inode.blocks[i] = -1; // Reset the block pointer
         }
     }
 
@@ -520,15 +583,6 @@ void mark_block_free ( int block_num ) {
 
 // Read an inode from disk
 void read_inode ( int inode_num , inode * target ) {
-
-    if (disk_fd < 0) {
-        return; // error opening file
-    }
-
-    // Ensure inode_num is within valid range
-    if (inode_num < 0 || inode_num >= MAX_FILES) {
-        return; // Invalid inode number
-    }
 
     // Read the inode table from disk
     inode inodes[MAX_FILES];
