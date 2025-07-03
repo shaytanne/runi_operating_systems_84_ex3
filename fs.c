@@ -101,8 +101,6 @@ int fs_format(const char* disk_path){
             inodes[i].blocks[j] = -1; // Initialize block pointers to -1
         }
     }
-    bitmap[2] |= (1 << 0); // Mark block 2 as used (inode table)
-    bitmap[3] |= (1 << 0); // Mark block 3 as used (inode table)
 
      // Writing inode table
     lseek(disk_fd, 2 * BLOCK_SIZE, SEEK_SET); // Move to block 2 (start of inode table)
@@ -175,7 +173,7 @@ int fs_mount(const char* disk_path){
             close(disk_fd);
             return -1; // Reserved blocks should be marked as used
         }
-        if ( (i >= 10) && !(bitmap[i / 8] & (1 << (i % 8))) ) {
+        if ( (i >= 10) && (bitmap[i / 8] & (1 << (i % 8))) ) {
             close(disk_fd);
             return -1; // Data blocks should be marked as free
         }
@@ -246,8 +244,22 @@ int fs_create(const char* filename)
     new_inode.size = 0;
     strncpy(new_inode.name, filename, 28);
 
+    // initialize block pointers to -1
+    for (int i = 0; i < MAX_DIRECT_BLOCKS; i++) {
+        new_inode.blocks[i] = -1;
+    }
+
     // Write the new inode to the disk
     write_inode(inode_index, &new_inode);
+
+    // update superblock - decrease free inode count
+    superblock sb;
+    lseek(disk_fd, 0, SEEK_SET);
+    read(disk_fd, &sb, sizeof(superblock));
+
+    sb.free_inodes--;
+    lseek(disk_fd, 0, SEEK_SET);
+    write(disk_fd, &sb, sizeof(superblock));
 
     return 0; // Success
 }
@@ -338,38 +350,80 @@ int fs_write(const char* filename, const void* data, int size) {
     // TODO:  Calculate number of blocks needed
     int num_blocks = (size + BLOCK_SIZE - 1) / BLOCK_SIZE; // Calculate number of blocks needed
 
-    inode inodes[MAX_FILES];
-    lseek(disk_fd, 2 * BLOCK_SIZE, SEEK_SET); // Move to the start of the inode table
-    read(disk_fd, inodes, sizeof(inodes)); // Read the inode table
-
     // Check if the file already has enough blocks allocated
     if (num_blocks > MAX_DIRECT_BLOCKS ) {
         return -2; // Too many blocks requested, exceeds maximum direct blocks
     }
 
-    // If the file already has blocks, free them before allocating new ones
-    if (target_inode.size > 0) {
-        for (int j = 0; j < MAX_DIRECT_BLOCKS; j++) {
-            if (target_inode.blocks[j] != -1) {
-                mark_block_free(target_inode.blocks[j]); // Free existing blocks
-                target_inode.blocks[j] = -1; // Reset the block pointer
-            }
+    // count existing blocks for superblock update
+    int old_blocks_used = 0;
+    for (int j = 0; j < MAX_DIRECT_BLOCKS; j++) {
+        if (target_inode.blocks[j] != -1) {
+            old_blocks_used++;
         }
-    } 
+    }
+
+    // read superblock
+    superblock sb;
+    lseek(disk_fd, 0, SEEK_SET);
+    read(disk_fd, &sb, sizeof(superblock));
+
+    // check if we have enough space (after freeing existing blocks)
+    if (num_blocks > sb.free_blocks + old_blocks_used) {
+        return -2; // Not enough space
+    }
+
+    // update superblock for freed blocks
+    sb.free_blocks += old_blocks_used;
+
+    // free existing blocks
+    for (int j = 0; j < MAX_DIRECT_BLOCKS; j++) {
+        if (target_inode.blocks[j] != -1) {
+            mark_block_free(target_inode.blocks[j]);
+            target_inode.blocks[j] = -1;
+        }
+    }
+
+    // // If the file already has blocks, free them before allocating new ones
+    // if (target_inode.size > 0) {
+    //     for (int j = 0; j < MAX_DIRECT_BLOCKS; j++) {
+    //         if (target_inode.blocks[j] != -1) {
+    //             mark_block_free(target_inode.blocks[j]); // Free existing blocks
+    //             target_inode.blocks[j] = -1; // Reset the block pointer
+    //         }
+    //     }
+    // } 
 
     for (int i = 0; i < num_blocks; i++)
     {
         int index_block = find_free_block();
 
         if (index_block < 0) {
+            // update superblock with blocks used so far
+            lseek(disk_fd, 0, SEEK_SET);
+            write(disk_fd, &sb, sizeof(superblock));
+
+            // save inode with partial blocks
+            write_inode(inode_index, &target_inode);
+            
             return -2; // Out of space
         }
 
         target_inode.blocks[i] = index_block; // Allocate a new block for the file
         mark_block_used(index_block); // Mark the block as used
+        sb.free_blocks--;
+
+        // Calculate how many bytes to write to this block
+        int bytes_to_write;
+        if (i == num_blocks - 1 && size % BLOCK_SIZE != 0) {
+            bytes_to_write = size % BLOCK_SIZE; // Last block partial
+        } 
+        else {
+            bytes_to_write = BLOCK_SIZE; // Full block
+        }
         
         lseek(disk_fd, target_inode.blocks[i] * BLOCK_SIZE, SEEK_SET);
-        write(disk_fd, data + (i * BLOCK_SIZE), BLOCK_SIZE);
+        write(disk_fd, (char*)data + (i * BLOCK_SIZE), bytes_to_write);
     }
 
 
@@ -379,6 +433,10 @@ int fs_write(const char* filename, const void* data, int size) {
 
     // Write the updated inode back to disk
     write_inode(inode_index, &target_inode);
+
+    // update superblock
+    lseek(disk_fd, 0, SEEK_SET);
+    write(disk_fd, &sb, sizeof(superblock));
 
     return 0; // Success
 }
@@ -404,7 +462,7 @@ int fs_read(const char* filename, void* buffer, int size){
         return -3; // Invalid filename
     }
 
-    if (buffer == NULL || size <= 0) {
+    if (buffer == NULL || size < 0) {
         return -3; // Invalid buffer or size
     }
 
@@ -465,21 +523,35 @@ int fs_delete(const char* filename)
     inode target_inode;
     read_inode(inode_index, &target_inode);
 
+    // Count blocks to free for superblock update
+    int blocks_freed = 0;
+
     // Free the data blocks associated with the inode
     for (int i = 0; i < MAX_DIRECT_BLOCKS; i++) {
         if (target_inode.blocks[i] >= 0) {
             mark_block_free(target_inode.blocks[i]);
             target_inode.blocks[i] = -1; // Reset the block pointer
+            blocks_freed++;
         }
     }
 
     // Mark the inode as free
     target_inode.used = false;
     target_inode.size = 0;
-    target_inode.name[0] = '\0'; // Clear the name
 
     // Write the updated inode back to disk
     write_inode(inode_index, &target_inode);
+
+    // Update superblock - increase free block count
+    superblock sb;
+    lseek(disk_fd, 0, SEEK_SET);
+    read(disk_fd, &sb, sizeof(superblock));
+
+    sb.free_blocks += blocks_freed;
+    sb.free_inodes++;
+
+    lseek(disk_fd, 0, SEEK_SET);
+    write(disk_fd, &sb, sizeof(superblock));
 
     return 0; // Success
 }
@@ -522,7 +594,7 @@ int find_free_inode () {
         }
     }
 
-    return -2; // No free inode found
+    return -1; // No free inode found
 }
 
 // Find a free block
