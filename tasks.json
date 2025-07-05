@@ -2,19 +2,45 @@
     "version": "2.0.0",
     "tasks": [
         {
-            "label": "build hello world",
+            "label": "build testfilesystem",
             "type": "shell",
             "command": "gcc",
             "args": [
                 "-g",
-                "main.c",
+                "fs.c",
+                "testfilesystem.c",
                 "-o",
-                "helloworld"
+                "test_fs"
             ],
             "group": {
                 "kind": "build",
                 "isDefault": true
-            }
+            },
+            "problemMatcher": [
+                "$gcc"
+            ]
+        },
+        {
+            "label": "build custom_tests",
+            "type": "shell",
+            "command": "gcc",
+            "args": [
+                "-g",
+                "fs.c",
+                "custom_tests.c",
+                "-o",
+                "custom_tests"
+            ],
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "problemMatcher": [
+                "$gcc"
+            ]
         }
+        
     ]
 }
+
+

@@ -2,10 +2,24 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Debug Hello World",
+            "name": "Debug filesystem",
             "type": "cppdbg",
             "request": "launch",
-            "program": "${workspaceFolder}/helloworld",
+            "program": "${workspaceFolder}/test_fs",
+            "args": [],
+            "stopAtEntry": false,
+            "cwd": "${workspaceFolder}",
+            "environment": [],
+            "externalConsole": false,
+            "MIMode": "gdb",
+            "miDebuggerPath": "/usr/bin/gdb"
+        },
+        
+        {
+            "name": "Debug custom tests",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/custom_tests",
             "args": [],
             "stopAtEntry": false,
             "cwd": "${workspaceFolder}",

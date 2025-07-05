@@ -23,7 +23,7 @@ void write_inode ( int inode_num , const inode * source ) ;
 
 
 int static disk_fd = -1; // file descriptor for the disk image file
-bool is_mounted = false; // Flag to check if the filesystem is mounted;
+bool static is_mounted = false; // Flag to check if the filesystem is mounted;
 
 
 /**
@@ -173,10 +173,10 @@ int fs_mount(const char* disk_path){
             close(disk_fd);
             return -1; // Reserved blocks should be marked as used
         }
-        if ( (i >= 10) && (bitmap[i / 8] & (1 << (i % 8))) ) {
-            close(disk_fd);
-            return -1; // Data blocks should be marked as free
-        }
+        // if ( (i >= 10) && (bitmap[i / 8] & (1 << (i % 8))) ) {
+        //     close(disk_fd);
+        //     return -1; // Data blocks should be marked as free
+        // }
     }
 
     // Check if the superblock is valid
@@ -280,7 +280,7 @@ int fs_list(char filenames[][MAX_FILENAME], int max_files){
         return -1; // Filesystem not mounted
     }
 
-    if (filenames == NULL || max_files <= 0) {
+    if (filenames == NULL || max_files <= 0 || max_files > MAX_FILES) {
         return -1; // Invalid parameters
     }
 

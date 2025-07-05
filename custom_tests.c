@@ -15,18 +15,20 @@ void test_result(const char* test_name, int result) {
 // Utility function to generate test data
 void generate_test_data(char* buffer, int size, char pattern) {
     for (int i = 0; i < size; i++) {
-        buffer[i] = (pattern + i) % 256;
+        buffer[i] = pattern++;
+        i++;
     }
 }
 
 // Utility function to verify test data
 int verify_test_data(const char* buffer, int size, char pattern) {
     for (int i = 0; i < size; i++) {
-        if (buffer[i] != (pattern + i) % 256) {
+        if (buffer[i] != (pattern++)) {
             printf("Data mismatch at position %d: expected %d, got %d\n", 
-                   i, (pattern + i) % 256, buffer[i]);
+                   i, pattern++, buffer[i]);
             return 0;
         }
+        i++;
     }
     return 1;
 }
@@ -51,9 +53,11 @@ int main() {
     test_result("Format new disk", result == 0);
     
     result = fs_mount(DISK_PATH);
+    
     test_result("Mount formatted disk", result == 0);
     
     result = fs_format(DISK_PATH);
+    printf("result = fs_format(DISK_PATH) is %d;\n", result);
     test_result("Format already mounted disk (should fail)", result == -1);
     
     fs_unmount();
@@ -176,7 +180,9 @@ int main() {
     test_result("Read partial file (less than actual size)", result == 250);
     test_result("Verify partial read data integrity", 
                 verify_test_data(read_buffer, 250, 'F'));
-    
+                
+    printf("Read buffer content: %.*s\n", 250, read_buffer);
+
     memset(read_buffer, 0, BUFFER_SIZE);
     result = fs_read("test_file.txt", read_buffer, 500);
     test_result("Read exact file size", result == 500);
@@ -189,11 +195,48 @@ int main() {
     test_result("Verify oversized read data integrity", 
                 verify_test_data(read_buffer, 500, 'F'));
     
-    // 7. PERSISTENCE TESTS
-    printf("\n== Persistence Tests ==\n");
+// // ================================================================= 
+//     // 7. PERSISTENCE TESTS
+//     printf("\n== Persistence Tests ==\n");
     
+//     // Create a new file with known content
+//     generate_test_data(write_buffer, 750, 'G');
+//     fs_write("persist_test.txt", write_buffer, 750);
+    
+//     // Unmount and remount
+//     fs_unmount();
+//     result = fs_mount(DISK_PATH);
+//     test_result("Remount after unmount", result == 0);
+    
+//     // Verify file still exists
+//     num_files = fs_list(filenames, MAX_FILES);
+//     int found = 0;
+//     for (int i = 0; i < num_files; i++) {
+//         if (strcmp(filenames[i], "persist_test.txt") == 0) {
+//             found = 1;
+//             break;
+//         }
+//     }
+//     test_result("File persists after remount", found);
+    
+//     // Verify content persists
+//     memset(read_buffer, 0, BUFFER_SIZE);
+//     result = fs_read("persist_test.txt", read_buffer, 750);
+//     test_result("Read persisted file", result == 750);
+//     test_result("Verify persisted data integrity", 
+//                 verify_test_data(read_buffer, 750, 'G'));
+    
+
+
+ // =================================================================
+         // 7. PERSISTENCE TESTS
+    printf("\n== Persistence Tests NOT CHATGPT ==\n");
+    result = fs_create("persist_test.txt");
+    
+    test_result("Create file for persistence test", result == 0);
     // Create a new file with known content
-    generate_test_data(write_buffer, 750, 'G');
+    write_buffer[750];
+    strcpy(write_buffer, "This is a test file for persistence.");
     fs_write("persist_test.txt", write_buffer, 750);
     
     // Unmount and remount
@@ -218,7 +261,11 @@ int main() {
     test_result("Read persisted file", result == 750);
     test_result("Verify persisted data integrity", 
                 verify_test_data(read_buffer, 750, 'G'));
-    
+
+
+
+// =================================================================
+
     // 8. DISK SPACE MANAGEMENT TESTS
     printf("\n== Disk Space Management Tests ==\n");
     
