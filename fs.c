@@ -21,7 +21,7 @@ void read_inode ( int inode_num , inode * target ) ;
 // Write an inode to disk
 void write_inode ( int inode_num , const inode * source ) ;
 
-int fs_get_free_blocks();
+int get_free_blocks();
 
 
 int static disk_fd = -1; // file descriptor for the disk image file
@@ -700,7 +700,7 @@ void write_inode ( int inode_num , const inode * source ) {
 }
 
 // Add to fs.c
-int fs_get_free_blocks() {
+int get_free_blocks() {
     if (!is_mounted || disk_fd < 0) {
         return -1;
     }

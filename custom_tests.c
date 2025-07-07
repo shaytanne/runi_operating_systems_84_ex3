@@ -330,7 +330,7 @@ int main() {
     fs_mount(DISK_PATH);
 
     // Get initial free blocks count
-    int initial_free_blocks = fs_get_free_blocks();
+    int initial_free_blocks = get_free_blocks();
     // printf("Initial free blocks: %d\n", initial_free_blocks);
 
     // Fill disk mostly full (leave a few blocks)
@@ -350,7 +350,7 @@ int main() {
         sprintf(file_name, "block_file_%d.txt", i);
         if (fs_create(file_name) != 0) break;
         
-        int free_before_write = fs_get_free_blocks();
+        int free_before_write = get_free_blocks();
         if (free_before_write <= 3 + blocks_per_file) {
             // Switch to smaller files when getting close
             blocks_per_file = 1;
@@ -361,7 +361,7 @@ int main() {
         if (result != 0) break;
         
         files_written++;
-        last_free_blocks = fs_get_free_blocks();
+        last_free_blocks = get_free_blocks();
         
         // Stop when we have exactly 3 blocks free
         if (last_free_blocks == 3) {
@@ -381,16 +381,16 @@ int main() {
     // CASE 2: COMPLETE EXHAUSTION - Use up remaining blocks completely
     printf("\nFilling remaining blocks completely...\n");
     for (int i = 0; i < 10; i++) {  // Just to be safe
-        if (fs_get_free_blocks() == 0) break;
+        if (get_free_blocks() == 0) break;
         
         sprintf(file_name, "final_block_%d.txt", i);
         fs_create(file_name);
         fs_write(file_name, "x", 1);  // Even 1 byte uses a full block
-        printf("Remaining blocks: %d\n", fs_get_free_blocks());
+        printf("Remaining blocks: %d\n", get_free_blocks());
     }
 
     // Verify we now have 0 free blocks
-    test_result("Filesystem completely full", fs_get_free_blocks() == 0);
+    test_result("Filesystem completely full", get_free_blocks() == 0);
 
     // Try to write to a new file with completely full disk
     result = fs_create("empty_file_2.txt");
