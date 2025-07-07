@@ -21,6 +21,8 @@ void read_inode ( int inode_num , inode * target ) ;
 // Write an inode to disk
 void write_inode ( int inode_num , const inode * source ) ;
 
+int fs_get_free_blocks();
+
 
 int static disk_fd = -1; // file descriptor for the disk image file
 bool static is_mounted = false; // Flag to check if the filesystem is mounted;
@@ -368,6 +370,23 @@ int fs_write(const char* filename, const void* data, int size) {
     lseek(disk_fd, 0, SEEK_SET);
     read(disk_fd, &sb, sizeof(superblock));
 
+    // Verify superblock free count against bitmap
+    unsigned char bitmap[MAX_BLOCKS / 8];
+    lseek(disk_fd, 1 * BLOCK_SIZE, SEEK_SET);
+    read(disk_fd, bitmap, sizeof(bitmap));
+    int free_in_bitmap = 0;
+    for (int i = 10; i < MAX_BLOCKS; i++) {
+        if (!(bitmap[i / 8] & (1 << (i % 8)))) {
+            free_in_bitmap++;
+        }
+    }
+    if (free_in_bitmap < sb.free_blocks) {
+        // Bitmap shows fewer free blocks than superblock thinks
+        sb.free_blocks = free_in_bitmap;
+        lseek(disk_fd, 0, SEEK_SET);
+        write(disk_fd, &sb, sizeof(superblock));
+    }
+
     // check if we have enough space (after freeing existing blocks)
     if (num_blocks > sb.free_blocks + old_blocks_used) {
         return -2; // Not enough space
@@ -383,16 +402,6 @@ int fs_write(const char* filename, const void* data, int size) {
             target_inode.blocks[j] = -1;
         }
     }
-
-    // // If the file already has blocks, free them before allocating new ones
-    // if (target_inode.size > 0) {
-    //     for (int j = 0; j < MAX_DIRECT_BLOCKS; j++) {
-    //         if (target_inode.blocks[j] != -1) {
-    //             mark_block_free(target_inode.blocks[j]); // Free existing blocks
-    //             target_inode.blocks[j] = -1; // Reset the block pointer
-    //         }
-    //     }
-    // } 
 
     for (int i = 0; i < num_blocks; i++)
     {
@@ -605,12 +614,25 @@ int find_free_block () {
     read(disk_fd, bitmap, sizeof(bitmap)); // Read the block bitmap
 
     // Search for a free block
-    // Skip the first 4 blocks (0-3) as they are reserved for superblock and metadata
+    // Skip the first 10 blocks (0-9) as they are reserved for superblock and metadata
     // TODO: Check if the bitmap is correctly initialized
     for (int i = 10; i < MAX_BLOCKS; i++) {
         if ( !(bitmap[i / 8] & (1 << (i % 8))) ) {
             return i; // Found a free block
         }
+    }
+
+    // No free blocks found - fix superblock if needed
+    superblock sb;
+    lseek(disk_fd, 0, SEEK_SET);
+    read(disk_fd, &sb, sizeof(superblock));
+    
+    if (sb.free_blocks > 0) {
+        // Superblock thinks there are free blocks but bitmap shows none
+        // This is a filesystem inconsistency - fix it
+        sb.free_blocks = 0;
+        lseek(disk_fd, 0, SEEK_SET);
+        write(disk_fd, &sb, sizeof(superblock));
     }
 
     return -1; // No free block found
@@ -684,4 +706,16 @@ void write_inode ( int inode_num , const inode * source ) {
     // Write the updated inode table back to disk
     lseek(disk_fd, 2 * BLOCK_SIZE, SEEK_SET); // Move back to the start of the inode table
     write(disk_fd, inodes, sizeof(inodes)); // Write the updated inode table
+}
+
+// Add to fs.c
+int fs_get_free_blocks() {
+    if (!is_mounted || disk_fd < 0) {
+        return -1;
+    }
+    
+    superblock sb;
+    lseek(disk_fd, 0, SEEK_SET);
+    read(disk_fd, &sb, sizeof(superblock));
+    return sb.free_blocks;
 }

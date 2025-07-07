@@ -33,11 +33,23 @@ int verify_test_data(const char* buffer, int size, char pattern) {
     return 1;
 }
 
+int compare_file_content_is_identical(const char* buffer, int size, const char* content) {
+    for (int i = 0; i < size; i++) {
+        if (buffer[i] != content[i]) {
+            printf("Data mismatch at position %d: expected %d, got %d\n", 
+                   i, content[i], buffer[i]);
+            return 0;
+        }
+    }
+    return 1;
+}   
+
 int main() {
     char write_buffer[BUFFER_SIZE];
     char read_buffer[BUFFER_SIZE];
     char filenames[MAX_FILES][MAX_FILENAME];
     int result;
+    char file_name[MAX_FILENAME];
     
     printf("==== ADVANCED FILESYSTEM TESTS ====\n\n");
     
@@ -259,10 +271,10 @@ int main() {
     memset(read_buffer, 0, BUFFER_SIZE);
     result = fs_read("persist_test.txt", read_buffer, 750);
     test_result("Read persisted file", result == 750);
+    // test_result("Verify persisted data integrity", 
+    //             verify_test_data(read_buffer, 750, 'G'));
     test_result("Verify persisted data integrity", 
-                verify_test_data(read_buffer, 750, 'G'));
-
-
+                compare_file_content_is_identical(read_buffer, 750, write_buffer));
 
 // =================================================================
 
@@ -271,7 +283,6 @@ int main() {
     
     // Create many small files to use up inodes
     int files_created = 0;
-    char file_name[MAX_FILENAME];
     for (int i = 0; i < MAX_FILES - 3; i++) { // -3 for existing files
         sprintf(file_name, "file_%d.txt", i);
         if (fs_create(file_name) == 0) {
@@ -292,6 +303,8 @@ int main() {
         sprintf(file_name, "file_%d.txt", i);
         fs_delete(file_name);
     }
+
+    fs_create("big_file.txt");
     
     // Write a large file to try to fill disk space
     int large_size = BLOCK_SIZE * 6; // Big enough to need multiple blocks
@@ -305,9 +318,91 @@ int main() {
         printf("Skipping large file test - not enough memory\n");
     }
     
-    // Clean up
+    // 9. BLOCK EXHAUSTION TEST
+    printf("\n== Block Exhaustion Test ==\n");
+
+    // First, create a clean filesystem
     fs_unmount();
-    
+    if (access(DISK_PATH, F_OK) == 0) {
+        remove(DISK_PATH);
+    }
+    fs_format(DISK_PATH);
+    fs_mount(DISK_PATH);
+
+    // Get initial free blocks count
+    int initial_free_blocks = fs_get_free_blocks();
+    // printf("Initial free blocks: %d\n", initial_free_blocks);
+
+    // Fill disk mostly full (leave a few blocks)
+    int blocks_per_file = MAX_DIRECT_BLOCKS - 1;
+    int file_size = blocks_per_file * BLOCK_SIZE;
+    char* block_test_buffer = malloc(file_size);
+    if (!block_test_buffer) {
+        printf("Failed to allocate buffer\n");
+        return 1;
+    }
+    memset(block_test_buffer, 'X', file_size);
+
+    // Fill disk until we have exactly 3 blocks left
+    int files_written = 0;
+    int last_free_blocks = initial_free_blocks;
+    for (int i = 0; i < 1000; i++) {
+        sprintf(file_name, "block_file_%d.txt", i);
+        if (fs_create(file_name) != 0) break;
+        
+        int free_before_write = fs_get_free_blocks();
+        if (free_before_write <= 3 + blocks_per_file) {
+            // Switch to smaller files when getting close
+            blocks_per_file = 1;
+            file_size = BLOCK_SIZE;
+        }
+        
+        result = fs_write(file_name, block_test_buffer, file_size);
+        if (result != 0) break;
+        
+        files_written++;
+        last_free_blocks = fs_get_free_blocks();
+        
+        // Stop when we have exactly 3 blocks free
+        if (last_free_blocks == 3) {
+            printf("Reached target of 3 free blocks\n");
+            break;
+        }
+    }
+
+    // CASE 1: PARTIAL SPACE - Try to write a file that needs more blocks than available
+    result = fs_create("need_5_blocks.txt");
+    test_result("Create file when space low", result == 0);
+
+    // Try to write 5 blocks of data when only 3 are available
+    result = fs_write("need_5_blocks.txt", block_test_buffer, 5 * BLOCK_SIZE);
+    test_result("Write file larger than available space (should fail)", result < 0);
+
+    // CASE 2: COMPLETE EXHAUSTION - Use up remaining blocks completely
+    printf("\nFilling remaining blocks completely...\n");
+    for (int i = 0; i < 10; i++) {  // Just to be safe
+        if (fs_get_free_blocks() == 0) break;
+        
+        sprintf(file_name, "final_block_%d.txt", i);
+        fs_create(file_name);
+        fs_write(file_name, "x", 1);  // Even 1 byte uses a full block
+        printf("Remaining blocks: %d\n", fs_get_free_blocks());
+    }
+
+    // Verify we now have 0 free blocks
+    test_result("Filesystem completely full", fs_get_free_blocks() == 0);
+
+    // Try to write to a new file with completely full disk
+    result = fs_create("empty_file_2.txt");
+    test_result("Create file when blocks completely full", result == 0);
+
+    result = fs_write("empty_file_2.txt", "test", 4);
+    test_result("Write to file when disk completely full (should fail)", result < 0);
+
+    // Clean up
+    free(block_test_buffer);
+    fs_unmount();
+        
     printf("\n==== TEST SUITE COMPLETE ====\n");
     return 0;
 }
