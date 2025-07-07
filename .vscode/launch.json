@@ -2,10 +2,10 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Debug filesystem",
+            "name": "Debug Filesystem",
             "type": "cppdbg",
             "request": "launch",
-            "program": "${workspaceFolder}/test_fs",
+            "program": "${workspaceFolder}/debug_test_fs",
             "args": [],
             "stopAtEntry": false,
             "cwd": "${workspaceFolder}",
@@ -16,10 +16,10 @@
         },
         
         {
-            "name": "Debug custom tests",
+            "name": "Debug Custom Tests",
             "type": "cppdbg",
             "request": "launch",
-            "program": "${workspaceFolder}/custom_tests",
+            "program": "${workspaceFolder}/debug_custom_tests",
             "args": [],
             "stopAtEntry": false,
             "cwd": "${workspaceFolder}",

@@ -2,7 +2,7 @@
     "version": "2.0.0",
     "tasks": [
         {
-            "label": "build testfilesystem",
+            "label": "debug testfilesystem",
             "type": "shell",
             "command": "gcc",
             "args": [
@@ -10,7 +10,7 @@
                 "fs.c",
                 "testfilesystem.c",
                 "-o",
-                "test_fs"
+                "debug_test_fs"
             ],
             "group": {
                 "kind": "build",
@@ -21,7 +21,7 @@
             ]
         },
         {
-            "label": "build custom_tests",
+            "label": "debug custom_tests",
             "type": "shell",
             "command": "gcc",
             "args": [
@@ -29,7 +29,7 @@
                 "fs.c",
                 "custom_tests.c",
                 "-o",
-                "custom_tests"
+                "debug_custom_tests"
             ],
             "group": {
                 "kind": "build",
